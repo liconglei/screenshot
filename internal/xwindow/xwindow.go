@@ -10,7 +10,7 @@ import (
 	mshm "github.com/jezek/xgb/shm"
 	"github.com/jezek/xgb/xinerama"
 	"github.com/jezek/xgb/xproto"
-	"github.com/kbinani/screenshot/internal/util"
+	"github.com/liconglei/screenshot/internal/util"
 )
 
 func Capture(x, y, width, height int) (img *image.RGBA, e error) {
