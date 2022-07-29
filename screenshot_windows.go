@@ -10,12 +10,46 @@ import (
 )
 
 var (
-	libUser32, _               = syscall.LoadLibrary("user32.dll")
-	funcGetDesktopWindow, _    = syscall.GetProcAddress(syscall.Handle(libUser32), "GetDesktopWindow")
-	funcEnumDisplayMonitors, _ = syscall.GetProcAddress(syscall.Handle(libUser32), "EnumDisplayMonitors")
-	funcGetMonitorInfo, _      = syscall.GetProcAddress(syscall.Handle(libUser32), "GetMonitorInfoW")
-	funcEnumDisplaySettings, _ = syscall.GetProcAddress(syscall.Handle(libUser32), "EnumDisplaySettingsW")
+	libUser32, _                 = syscall.LoadLibrary("user32.dll")
+	libDwmApi, _                 = syscall.LoadLibrary("dwmapi.dll")
+	funcGetDesktopWindow, _      = syscall.GetProcAddress(syscall.Handle(libUser32), "GetDesktopWindow")
+	funcEnumDisplayMonitors, _   = syscall.GetProcAddress(syscall.Handle(libUser32), "EnumDisplayMonitors")
+	funcGetMonitorInfo, _        = syscall.GetProcAddress(syscall.Handle(libUser32), "GetMonitorInfoW")
+	funcEnumDisplaySettings, _   = syscall.GetProcAddress(syscall.Handle(libUser32), "EnumDisplaySettingsW")
+	funcSetProcessDPIAware, _    = syscall.GetProcAddress(syscall.Handle(libUser32), "SetProcessDPIAware")
+	funcDwmGetWindowAttribute, _ = syscall.GetProcAddress(syscall.Handle(libDwmApi), "DwmGetWindowAttribute")
 )
+
+// CaptureScreen Capture whole screen include taskbar.
+func CaptureScreen() (*image.RGBA, error) {
+	width := int(win.GetSystemMetrics(win.SM_CXSCREEN))
+	height := int(win.GetSystemMetrics(win.SM_CYSCREEN))
+	return Capture(0, 0, width, height)
+}
+
+func CaptureWindow(windowName string) (*image.RGBA, error) {
+	lpWindowName, err := syscall.UTF16PtrFromString(windowName)
+	if err != nil {
+		panic(err)
+	}
+
+	hwndWindow := win.FindWindow(nil, lpWindowName)
+	if hwndWindow == 0 {
+		return nil, errors.New("invalid hwnd")
+	}
+
+	SetProcessDPIAware()
+
+	bounds := new(win.RECT)
+	if DwmGetWindowAttribute(hwndWindow, DWMWA_EXTENDED_FRAME_BOUNDS, uintptr(unsafe.Pointer(bounds)),
+		unsafe.Sizeof(*bounds)) != nil {
+		return nil, errors.New("DwmGetWindowAttribute failed")
+	}
+
+	width := int(bounds.Right - bounds.Left)
+	height := int(bounds.Bottom - bounds.Top)
+	return Capture(int(bounds.Left), int(bounds.Top), width, height)
+}
 
 func Capture(x, y, width, height int) (*image.RGBA, error) {
 	rect := image.Rect(0, 0, width, height)
@@ -108,6 +142,39 @@ func GetDisplayBounds(displayIndex int) image.Rectangle {
 	return image.Rect(
 		int(ctx.Rect.Left), int(ctx.Rect.Top),
 		int(ctx.Rect.Right), int(ctx.Rect.Bottom))
+}
+
+const (
+	DWMWA_NCRENDERING_ENABLED         = 1
+	DWMWA_NCRENDERING_POLICY          = 2
+	DWMWA_TRANSITIONS_FORCEDISABLED   = 3
+	DWMWA_ALLOW_NCPAINT               = 4
+	DWMWA_CAPTION_BUTTON_BOUNDS       = 5
+	DWMWA_NONCLIENT_RTL_LAYOUT        = 6
+	DWMWA_FORCE_ICONIC_REPRESENTATION = 7
+	DWMWA_FLIP3D_POLICY               = 8
+	DWMWA_EXTENDED_FRAME_BOUNDS       = 9
+	DWMWA_HAS_ICONIC_BITMAP           = 10
+	DWMWA_DISALLOW_PEEK               = 11
+	DWMWA_EXCLUDED_FROM_PEEK          = 12
+	DWMWA_CLOAK                       = 13
+	DWMWA_CLOAKED                     = 14
+	DWMWA_FREEZE_REPRESENTATION       = 15
+	DWMWA_LAST                        = 16
+)
+
+func SetProcessDPIAware() bool {
+	ret, _, _ := syscall.Syscall(funcSetProcessDPIAware, 0, 0, 0, 0)
+	return int(ret) != 0
+}
+
+func DwmGetWindowAttribute(hwnd win.HWND, attribute uint32, value uintptr, size uintptr) (ret error) {
+	r0, _, _ := syscall.Syscall6(funcDwmGetWindowAttribute, 4, uintptr(hwnd), uintptr(attribute), value,
+		size, 0, 0)
+	if r0 != 0 {
+		ret = syscall.Errno(r0)
+	}
+	return
 }
 
 func getDesktopWindow() win.HWND {
